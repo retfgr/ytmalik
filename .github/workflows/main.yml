@@ -1,0 +1,53 @@
+name: Continuous RDP
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 1440  # Set timeout to 1440 minutes (24 hours)
+
+    steps:
+      - name: Download Ngrok
+        run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
+
+      - name: Extract Ngrok
+        run: Expand-Archive ngrok.zip
+
+      - name: Authenticate Ngrok
+        run: .\ngrok\ngrok.exe authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+
+      - name: Enable Remote Desktop (RDP)
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "MaxConnectionTime" -Value 0
+          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+
+      - name: Increase VM RAM and Storage (Example for Azure VM)
+        run: |
+          # Example: Adjust VM size for increased RAM and storage
+          az vm resize --resource-group myResourceGroup --name myVM --size Standard_D4s_v3
+
+      - name: Create Ngrok Tunnel for RDP
+        run: Start-Process Powershell -ArgumentList '-Noexit -Command ".\ngrok\ngrok.exe tcp 3389"'
+
+      - name: Keep Session Alive
+        run: |
+          # Loop to keep the session active for 24 hours
+          $endTime = (Get-Date).AddHours(24)  # Set end time for 24 hours from now
+          while ((Get-Date) -lt $endTime) {
+            Write-Output "Keeping RDP session active..."
+            Start-Sleep -Seconds 300  # Sleep for 5 minutes (adjust as needed)
+          }
+
+      - name: Self-Destruct (Clean up resources)
+        run: |
+          taskkill /IM ngrok.exe /F  # Terminate Ngrok process
